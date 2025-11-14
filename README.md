@@ -1,1 +1,3 @@
-# trancs5903
+# WCamDetect
+
+WCamDetect is a wireless-camera traffic identification project that collects raw packets using tcpdump and extracts only header-level features suitable for privacy-preserving analysis. The captured packets are processed into statistical and structural features that summarize traffic patterns without relying on any encrypted payloads. These features are then used to train a machine learning classifier capable of distinguishing camera streams from non-camera wireless devices. The goal of the project is to build a robust, data-driven pipeline for detecting hidden or unauthorized wireless cameras based solely on observable network data.
