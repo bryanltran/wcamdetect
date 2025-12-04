@@ -5,7 +5,7 @@ train_model.py - Train and Compare Multiple ML Models
 Trains three classifiers and compares their performance:
 1. Random Forest
 2. Support Vector Machine (SVM)
-3. Gradient Boosting
+3. K-Nearest Neighbors (KNN)
 
 This version adds PNG outputs (matplotlib only) for:
  - Confusion matrices (per model)
@@ -31,8 +31,9 @@ import pickle
 import time
 import os
 
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import (
     classification_report,
@@ -55,10 +56,12 @@ class ModelTrainer:
         self.models_dir = Path(__file__).parent.parent / "data" / "models"
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
-        # Directory to save plots
         self.plots_dir = self.models_dir.parent / "plots"
         self.plots_dir.mkdir(parents=True, exist_ok=True)
 
+        # -------------------------
+        # MODELS (KNN added)
+        # -------------------------
         self.models = {
             'Random Forest': {
                 'model': RandomForestClassifier(
@@ -82,22 +85,21 @@ class ModelTrainer:
                 'filename': 'svm_model.pkl',
                 'needs_scaling': True
             },
-            'Gradient Boosting': {
-                'model': GradientBoostingClassifier(
-                    n_estimators=100,
-                    learning_rate=0.1,
-                    max_depth=5,
-                    random_state=42
+            'KNN': {
+                'model': KNeighborsClassifier(
+                    n_neighbors=5,
+                    weights='uniform',
+                    metric='minkowski',
+                    p=2
                 ),
-                'filename': 'gradient_boosting_model.pkl',
-                'needs_scaling': False
+                'filename': 'knn_model.pkl',
+                'needs_scaling': True
             }
         }
 
         self.results = {}
 
     def save_plot(self, fig, filename):
-        """Utility to save matplotlib figures to PNG."""
         safe_name = filename.replace(" ", "_")
         path = self.plots_dir / safe_name
         fig.savefig(path, dpi=300, bbox_inches='tight')
@@ -105,7 +107,6 @@ class ModelTrainer:
         print(f"Saved plot: {path}")
 
     def load_data(self):
-        """Load dataset from JSON."""
         if not self.features_json.exists():
             raise FileNotFoundError(
                 f"Features file not found: {self.features_json}\n"
@@ -118,20 +119,17 @@ class ModelTrainer:
 
         if len(dataset) < 10:
             print(f"WARNING: Only {len(dataset)} samples found.")
-            print("More samples are recommended for stable performance.")
 
         df = pd.DataFrame(dataset)
         print(f"Loaded {len(df)} samples")
-        if 'label' in df.columns:
-            print(f"Class distribution: {df['label'].value_counts().to_dict()}")
-        else:
-            raise KeyError("The loaded dataset must contain a 'label' column.")
 
+        if 'label' not in df.columns:
+            raise KeyError("Dataset must contain 'label' field.")
+
+        print(f"Class distribution: {df['label'].value_counts().to_dict()}")
         return df
 
     def prepare_data(self, df):
-        """Split into training and testing sets."""
-        # drop filename if present, otherwise only drop label
         drop_cols = ['label']
         if 'filename' in df.columns:
             drop_cols.append('filename')
@@ -140,7 +138,6 @@ class ModelTrainer:
         y = df['label']
         X = X.fillna(0)
 
-        # ensure stratify is possible (requires at least 2 classes and >1 sample per class)
         stratify_param = y if len(y.unique()) > 1 and all(y.value_counts() > 1) else None
 
         X_train, X_test, y_train, y_test = train_test_split(
@@ -154,7 +151,6 @@ class ModelTrainer:
         return X_train, X_test, y_train, y_test
 
     def train_model(self, name, config, X_train, X_test, y_train, y_test):
-        """Train a single model and compute evaluation metrics."""
         print("\n" + "="*60)
         print(f"Training: {name}")
         print("="*60)
@@ -167,8 +163,8 @@ class ModelTrainer:
             X_test_scaled = scaler.transform(X_test)
             config['scaler'] = scaler
         else:
-            X_train_scaled = X_train.values if isinstance(X_train, pd.DataFrame) else X_train
-            X_test_scaled = X_test.values if isinstance(X_test, pd.DataFrame) else X_test
+            X_train_scaled = X_train.values
+            X_test_scaled = X_test.values
             config['scaler'] = None
 
         start_time = time.time()
@@ -179,25 +175,21 @@ class ModelTrainer:
         y_pred = model.predict(X_test_scaled)
         predict_time = time.time() - start_time
 
-        # For binary metrics, ensure pos_label exists; if labels are not strings 'camera'/'non-camera',
-        # allow metrics to compute with default behavior.
         pos_label = 'camera' if 'camera' in y_test.unique() else None
 
         try:
             accuracy = accuracy_score(y_test, y_pred)
-            if pos_label is not None:
+            if pos_label:
                 precision = precision_score(y_test, y_pred, pos_label=pos_label)
                 recall = recall_score(y_test, y_pred, pos_label=pos_label)
                 f1 = f1_score(y_test, y_pred, pos_label=pos_label)
             else:
-                # fallback to binary average if labels are booleans or numeric 0/1
                 precision = precision_score(y_test, y_pred, average='binary')
                 recall = recall_score(y_test, y_pred, average='binary')
                 f1 = f1_score(y_test, y_pred, average='binary')
         except Exception:
-            # If metrics fail (e.g., single class present in y_test), fallback to safe values
-            precision = recall = f1 = 0.0
             accuracy = accuracy_score(y_test, y_pred)
+            precision = recall = f1 = 0.0
 
         X_full = pd.concat([X_train, X_test])
         y_full = pd.concat([y_train, y_test])
@@ -205,18 +197,15 @@ class ModelTrainer:
         if config['needs_scaling']:
             X_full_scaled = config['scaler'].fit_transform(X_full)
         else:
-            X_full_scaled = X_full.values if isinstance(X_full, pd.DataFrame) else X_full
+            X_full_scaled = X_full.values
 
-        # Choose a reasonable cv value
         cv = min(5, max(2, len(X_full) // 2))
         try:
             cv_scores = cross_val_score(model, X_full_scaled, y_full, cv=cv)
             cv_mean = cv_scores.mean()
             cv_std = cv_scores.std()
         except Exception:
-            cv_scores = np.array([0.0])
-            cv_mean = 0.0
-            cv_std = 0.0
+            cv_mean = cv_std = 0.0
 
         self.results[name] = {
             'accuracy': accuracy,
@@ -243,57 +232,37 @@ class ModelTrainer:
         print(f"  Train Time:    {train_time:.3f}s")
         print(f"  Predict Time:  {predict_time:.4f}s")
 
-        cm = confusion_matrix(y_test, y_pred, labels=['camera', 'non-camera']) \
-             if set(['camera', 'non-camera']).issubset(set(y_test.unique())) \
-             else confusion_matrix(y_test, y_pred)
+        cm = confusion_matrix(y_test, y_pred)
 
-        # Print confusion matrix (text)
-        if cm.shape == (2, 2) and set(['camera', 'non-camera']).issubset(set(y_test.unique())):
-            print("\nConfusion Matrix:")
-            print("                  Predicted")
-            print("               Camera  Non-Camera")
-            print(f"Actual Camera     {cm[0][0]:4d}       {cm[0][1]:4d}")
-            print(f"Actual Non-Camera {cm[1][0]:4d}       {cm[1][1]:4d}")
-        else:
-            print("\nConfusion Matrix (labels may differ from 'camera'/'non-camera'):")
-            print(cm)
-
-        # Plot confusion matrix to PNG using matplotlib (no seaborn)
         fig, ax = plt.subplots(figsize=(6, 5))
         im = ax.imshow(cm, interpolation='nearest', cmap='Blues')
         ax.set_title(f"Confusion Matrix - {name}")
         plt.colorbar(im, ax=ax)
 
-        # If we used specific labels ('camera','non-camera'), show them; else use label indices
-        if set(['camera', 'non-camera']).issubset(set(y_test.unique())):
-            tick_labels = ['camera', 'non-camera']
-        else:
-            # fallback to sorted unique labels
-            unique_labels = list(pd.Series(y_test).unique())
-            tick_labels = [str(l) for l in unique_labels]
+        labels = list(pd.Series(y_test).unique())
+        ax.set_xticks(np.arange(len(labels)))
+        ax.set_yticks(np.arange(len(labels)))
+        ax.set_xticklabels(labels, rotation=45)
+        ax.set_yticklabels(labels)
 
-        ax.set_xticks(np.arange(cm.shape[1]))
-        ax.set_yticks(np.arange(cm.shape[0]))
-        ax.set_xticklabels(tick_labels, rotation=45)
-        ax.set_yticklabels(tick_labels)
-
-        # annotate cells
         thresh = cm.max() / 2. if cm.max() != 0 else 0.5
         for i in range(cm.shape[0]):
             for j in range(cm.shape[1]):
-                ax.text(j, i, format(int(cm[i, j]), 'd'),
-                        ha="center", va="center",
-                        color="white" if cm[i, j] > thresh else "black")
+                ax.text(
+                    j, i, int(cm[i, j]),
+                    ha="center", va="center",
+                    color="white" if cm[i, j] > thresh else "black"
+                )
 
         ax.set_ylabel('Actual')
         ax.set_xlabel('Predicted')
         fig.tight_layout()
+
         plot_name = f"confusion_matrix_{name.lower().replace(' ', '_')}.png"
         self.save_plot(fig, plot_name)
 
-        # Save model + scaler + feature names
         model_path = self.models_dir / config['filename']
-        feature_names = X_train.columns.tolist() if isinstance(X_train, pd.DataFrame) else []
+        feature_names = X_train.columns.tolist()
         model_data = {
             'model': model,
             'scaler': config['scaler'],
@@ -304,11 +273,9 @@ class ModelTrainer:
             pickle.dump(model_data, f)
 
         print(f"\nSaved model to {model_path}")
-
         return model
 
     def print_comparison(self):
-        """Summarize results across all trained models and save comparison plot."""
         print("\n" + "="*80)
         print("MODEL COMPARISON")
         print("="*80 + "\n")
@@ -329,7 +296,6 @@ class ModelTrainer:
         df_comparison = pd.DataFrame(comparison_data)
         print(df_comparison.to_string(index=False))
 
-        # Create a numeric comparison plot (Accuracy and F1)
         models = list(self.results.keys())
         accuracy = [self.results[m]['accuracy'] for m in models]
         f1 = [self.results[m]['f1'] for m in models]
@@ -348,15 +314,16 @@ class ModelTrainer:
         ax.set_title("Model Performance Comparison")
         ax.legend()
 
-        # Annotate bars with percentage values
         for barset in (bars1, bars2):
             for bar in barset:
                 h = bar.get_height()
-                ax.annotate(f"{h:.2%}",
-                            xy=(bar.get_x() + bar.get_width() / 2, h),
-                            xytext=(0, 3),
-                            textcoords="offset points",
-                            ha='center', va='bottom', fontsize=8)
+                ax.annotate(
+                    f"{h:.2%}",
+                    xy=(bar.get_x() + bar.get_width() / 2, h),
+                    xytext=(0, 3),
+                    textcoords="offset points",
+                    ha='center', va='bottom', fontsize=8
+                )
 
         fig.tight_layout()
         self.save_plot(fig, "model_performance_comparison.png")
@@ -385,7 +352,7 @@ class ModelTrainer:
             print(f"  F1-Score: {best_model[1]['f1']:.2%}")
             print(f"  CV Score: {best_model[1]['cv_mean']:.2%}")
         except Exception:
-            print("No recommendation available (insufficient results).")
+            print("No recommendation available.")
 
         try:
             fastest = min(self.results.items(), key=lambda x: x[1]['predict_time'])
@@ -395,7 +362,6 @@ class ModelTrainer:
             print("No timing information available.")
 
     def print_feature_importance(self, X_train):
-        """Display Random Forest feature importance and save a plot."""
         print("\n" + "="*80)
         print("FEATURE IMPORTANCE (Random Forest)")
         print("="*80 + "\n")
@@ -406,9 +372,8 @@ class ModelTrainer:
 
         rf = self.results['Random Forest']['model']
 
-        # ensure feature_importances_ exists
         if not hasattr(rf, 'feature_importances_'):
-            print("Random Forest model does not expose feature_importances_.")
+            print("Random Forest does not expose feature_importances_.")
             return
 
         importance = pd.DataFrame({
@@ -432,14 +397,12 @@ class ModelTrainer:
 
         print("\nFeature Category Contributions:")
         for category, keys in categories.items():
-            # build pattern for contains
             pattern = '|'.join(keys)
             total = importance[importance['Feature'].str.contains(pattern)]['Importance'].sum()
             print(f"{category:<20s}: {total:.4f}")
 
-        # Plot top N feature importances (horizontal bar chart)
         top_n = min(20, len(importance))
-        top_features = importance.head(top_n).iloc[::-1]  # reverse for horizontal bar ordering
+        top_features = importance.head(top_n).iloc[::-1]
 
         fig, ax = plt.subplots(figsize=(10, max(4, 0.3 * top_n)))
         y_pos = np.arange(len(top_features))
@@ -448,11 +411,11 @@ class ModelTrainer:
         ax.set_yticklabels(top_features['Feature'].values)
         ax.set_xlabel("Importance")
         ax.set_title("Top Feature Importances (Random Forest)")
+
         fig.tight_layout()
         self.save_plot(fig, "feature_importance_random_forest.png")
 
     def train_all(self):
-        """Full training pipeline."""
         print("\n" + "="*80)
         print("CAMERA FLOW CLASSIFIER - TRAINING")
         print("="*80 + "\n")
@@ -473,9 +436,7 @@ class ModelTrainer:
         print(f"Plots saved to: {self.plots_dir}")
         print("Next steps:")
         print("  python scripts/predict.py <pcap_file>")
-        print("  Consider collecting additional samples if accuracy is low.")
         print()
-
 
 def main():
     project_root = Path(__file__).parent.parent
@@ -483,7 +444,6 @@ def main():
 
     trainer = ModelTrainer(features_json)
     trainer.train_all()
-
 
 if __name__ == "__main__":
     main()
