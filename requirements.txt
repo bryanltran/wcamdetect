@@ -1,0 +1,13 @@
+# Core ML and Data Processing
+scikit-learn>=1.3.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Packet Capture and Network Analysis
+scapy>=2.5.0
+
+# Visualization
+matplotlib>=3.7.0
+
+# GUI (usually comes with Python, but just in case)
+# tkinter - included with Python standard library
