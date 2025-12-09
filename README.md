@@ -112,7 +112,7 @@ Running it previews packets; press Enter to begin capture.
 
 Run:
 ```bash
-python parse.py
+python scripts/parse.py
 ```
 
 Outputs features to:
@@ -126,7 +126,7 @@ data/processed/features.json
 
 Run:
 ```bash
-python train.py
+python scripts/train.py
 ```
 
 Produces:
