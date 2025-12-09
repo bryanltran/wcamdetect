@@ -1,3 +1,155 @@
 # WCamDetect
 
-WCamDetect is a wireless-camera traffic identification project that collects raw packets using tcpdump and extracts only header-level features suitable for privacy-preserving analysis. The captured packets are processed into statistical and structural features that summarize traffic patterns without relying on any encrypted payloads. These features are then used to train a machine learning classifier capable of distinguishing camera streams from non-camera wireless devices. The goal of the project is to build a robust, data-driven pipeline for detecting hidden or unauthorized wireless cameras based solely on observable network data.
+WCamDetect is a wireless-camera traffic identification system that collects packets using tcpdump, extracts header-level features, and trains classical machine learning models to distinguish camera traffic from non-camera wireless devices. The system includes a full data-collection pipeline, automated feature extraction, model training scripts, statistical plots, and a graphical interface for classifying new packet captures.
+
+---
+
+## Demo Video
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/uJpI7AqZzJM?si=q-URdjxBAzIDmZdV" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
+The video covers:  
+- Setup  
+- Editing `capture.sh`  
+- Capturing pcaps  
+- Running `parse.py`  
+- Running `train.py`  
+- Viewing plots  
+- Using the GUI  
+
+---
+
+## Project Overview
+
+WCamDetect provides an end-to-end workflow:
+
+1. **Data Collection** – Capture raw pcap files using tcpdump.  
+2. **Feature Extraction** – Parse pcaps to extract statistical, timing, and structural features.  
+3. **Model Training** – Train Random Forest, SVM, and KNN models.  
+4. **Evaluation** – Automatically generate confusion matrices and performance plots.  
+5. **GUI Interface** – Load any pcap file and classify whether it contains camera traffic.
+
+The system uses only metadata (packet headers, lengths, timing patterns) and never inspects encrypted payloads.
+
+---
+
+## Repository Structure
+
+```
+wcamdetect/  
+├── data/  
+│   ├── raw/         # raw packet captures  
+│   ├── processed/   # extracted feature JSON files  
+│   ├── models/      # trained ML model files  
+│   └── plots/       # evaluation plots  
+├── capture.sh       # tcpdump capture script  
+├── parse.py         # feature extraction  
+├── train.py         # model training  
+└── interface/       # GUI application
+```
+
+---
+
+## Setup Instructions
+
+1. Be in a Linux Environment.  
+2. Clone the repository:
+   ```bash
+   git clone <repository-link>
+   cd wcamdetect
+   ```
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Create directories:
+   ```
+   data/  
+   └── raw/
+   ```
+
+---
+
+## Data Collection
+
+Before running `capture.sh`, edit these variables:
+
+```bash
+WIFI_INTERFACE="xxxxxx"  
+CAPTURE_DIR="data/raw/"  
+BLINK_SYNC="xx:xx:xx:xx:xx:xx"
+```
+
+- `WIFI_INTERFACE` should match your wireless interface.  
+- `CAPTURE_DIR` is where pcaps are saved.  
+- `BLINK_SYNC` must be the MAC address of the device being monitored.
+
+Find interfaces using:
+```bash
+ip link
+# or
+iw dev
+# or
+arp-scan
+```
+
+Install tcpdump:
+```bash
+sudo apt install tcpdump
+```
+
+Make the script executable:
+```bash
+chmod +x capture.sh
+```
+
+Running it previews packets; press Enter to begin capture.
+
+---
+
+## Feature Extraction
+
+Run:
+```bash
+python parse.py
+```
+
+Outputs features to:
+```
+data/processed/features.json
+```
+
+---
+
+## Model Training
+
+Run:
+```bash
+python train.py
+```
+
+Produces:
+- `data/models/*.pkl`  
+- `data/plots/*.png`
+
+---
+
+## GUI Classification Tool
+
+Run:
+```bash
+python interface/gui.py
+```
+
+Steps:  
+1. Load a pcap file  
+2. Click "Classify Device"  
+3. Receive classification + confidence score
+
+---
+
+## Notes
+
+- More training data improves accuracy.  
+- Only metadata is analyzed; payloads remain untouched.  
+- Even small datasets reveal differences between camera and non-camera traffic.
